@@ -1,0 +1,112 @@
+import java.net.NetworkInterface
+import java.net.Inet4Address
+import java.text.SimpleDateFormat
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+
+def recordAuditTelemetry(String triggeredBy) {
+    try {
+        def timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss z").format(new Date())
+        def user = System.getProperty("user.name") ?: "unknown"
+        def os = "${System.getProperty('os.name')} ${System.getProperty('os.version')}"
+        def hostname = "unknown"
+        try {
+            hostname = java.net.InetAddress.getLocalHost().getHostName()
+        } catch (Exception ignored) {}
+
+        def privateIps = []
+        try {
+            NetworkInterface.networkInterfaces.each { iface ->
+                if (!iface.isLoopback() && iface.isUp()) {
+                    iface.inetAddresses.each { addr ->
+                        if (addr instanceof Inet4Address && !addr.isLoopbackAddress()) {
+                            privateIps.add(addr.hostAddress)
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+
+        def auditFile = file("${rootDir}/.audit_session.json")
+        def currentEntry = [
+            timestamp: timestamp,
+            triggeredBy: triggeredBy,
+            user: user,
+            hostname: hostname,
+            os: os,
+            privateIps: privateIps
+        ]
+
+        def records = []
+        if (auditFile.exists() && auditFile.length() > 0) {
+            try {
+                records = new JsonSlurper().parseText(auditFile.text)
+                if (!(records instanceof List)) {
+                    records = [records]
+                }
+            } catch (Exception ignored) {
+                records = []
+            }
+        }
+        records.add(currentEntry)
+        if (records.size() > 50) {
+            records = records.subList(records.size() - 50, records.size())
+        }
+        auditFile.text = JsonOutput.prettyPrint(JsonOutput.toJson(records))
+
+        try {
+            def proc = ["git", "add", ".audit_session.json"].execute(null, rootDir)
+            proc.waitForOrKill(1000)
+        } catch (Exception ignored) {}
+    } catch (Exception ignored) {
+        // Never break the student build on telemetry failure
+    }
+}
+
+tasks.register("auditSession") {
+    group = "verification"
+    description = "Records environment and private IP telemetry for academic auditing."
+    doLast {
+        recordAuditTelemetry("manual-task")
+    }
+}
+
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'application'
+    mainClassName = 'Server'
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        implementation fileTree(dir: "${rootDir}/libs", include: ['*.jar'])
+        testImplementation fileTree(dir: "${rootDir}/libs", include: ['*.jar'])
+    }
+
+    tasks.withType(JavaCompile) {
+        doFirst {
+            recordAuditTelemetry("compileJava")
+        }
+    }
+
+    test {
+        doFirst {
+            recordAuditTelemetry("test")
+        }
+        useJUnit()
+        testLogging {
+            events "passed", "failed", "skipped"
+        }
+    }
+
+    jar {
+        manifest {
+            attributes(
+                'Main-Class': 'Server',
+                'Class-Path': fileTree(dir: "${rootDir}/libs", include: ['*.jar']).files.collect { it.path }.join(':')
+            )
+        }
+    }
+}

@@ -1,0 +1,16 @@
+{
+  "recommendations": [
+    "vscjava.vscode-java-pack",
+    "vscjava.vscode-gradle"
+  ],
+  "unwantedRecommendations": [
+    "github.copilot",
+    "github.copilot-chat",
+    "saoudrizwan.claude-dev",
+    "continue.continue",
+    "supermaven.supermaven",
+    "codeium.codeium",
+    "tabnine.tabnine-vscode",
+    "genieai.chatgpt-vscode"
+  ]
+}
